@@ -1,4 +1,4 @@
-# Custom-Node-ComfyUI-NBP-Uncut
+# Custom-Node-ComfyUI-NBP-Uncut for Vertex AI
 
 Node to use NBP with custom API key to improve data privacy control.
 The node is, once installed available in comfy node tree under "UncutNodes"
