@@ -1,4 +1,5 @@
 import os
+import time
 import torch
 import numpy as np
 from PIL import Image
@@ -8,6 +9,7 @@ import json
 import requests as http_requests
 from google import genai
 from google.genai import types
+from google.genai.errors import ClientError
 from google.oauth2.credentials import Credentials
 
 # --- Configuration Logic (Modified to store GCP Project Info) ---
@@ -127,26 +129,47 @@ class NanoBananaProNodeVertex:
                 contents.extend(processed_images)
             contents.append(prompt)
 
-            response = client.models.generate_content(
-                model="gemini-3-pro-image-preview", # Nano Banana Pro
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_instruction,
-                    response_modalities=['IMAGE'],
-                    image_config=types.ImageConfig(
-                        aspect_ratio=aspect_ratio,
-                        image_size=resolution 
-                    ),
-                    seed=seed % 2147483647,
-                    # Vertex AI IAM allows setting thresholds to OFF
-                    safety_settings=[
-                        types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="OFF"),
-                        types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="OFF"),
-                        types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="OFF"),
-                        types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="OFF"),
-                    ]
-                )
-            )
+            max_retries = 5
+            retry_delay = 10  # Start with 10 seconds for 429 errors
+
+            for attempt in range(max_retries):
+                try:
+                    response = client.models.generate_content(
+                        model="gemini-3-pro-image-preview", # Nano Banana Pro
+                        contents=contents,
+                        config=types.GenerateContentConfig(
+                            system_instruction=system_instruction,
+                            response_modalities=['IMAGE'],
+                            image_config=types.ImageConfig(
+                                aspect_ratio=aspect_ratio,
+                                image_size=resolution 
+                            ),
+                            seed=seed % 2147483647,
+                            # Vertex AI IAM allows setting thresholds to OFF
+                            safety_settings=[
+                                types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="OFF"),
+                                types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="OFF"),
+                                types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="OFF"),
+                                types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="OFF"),
+                            ]
+                        )
+                    )
+                    break # Success!
+                except ClientError as e:
+                    if "429" in str(e) and attempt < max_retries - 1:
+                        print(f"Vertex AI quota exceeded (429). Retrying in {retry_delay} seconds... (Attempt {attempt + 1}/{max_retries})")
+                        time.sleep(retry_delay)
+                        retry_delay *= 2  # Exponential backoff
+                    else:
+                        raise e # Re-raise if not 429 or max retries reached
+                except Exception as e:
+                    if "429" in str(e) and attempt < max_retries - 1:
+                        # Fallback for other exceptions that might contain 429
+                        print(f"Vertex AI quota exceeded (429) - Generic Exception. Retrying in {retry_delay} seconds... (Attempt {attempt + 1}/{max_retries})")
+                        time.sleep(retry_delay)
+                        retry_delay *= 2
+                    else:
+                        raise e
 
             # Output processing logic
             if hasattr(response, "candidates") and response.candidates:
