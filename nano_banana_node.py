@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import torch
 import numpy as np
@@ -48,6 +49,39 @@ def fetch_vertex_token(server_ip):
         return token
     except Exception as e:
         raise Exception(f"Failed to fetch Vertex token from {url}: {e}")
+
+def interpret_safety_error(error_message):
+    SAFETY_ERROR_CODES = {
+        "58061214": "Child", "17301594": "Child",
+        "29310472": "Celebrity", "15236754": "Celebrity",
+        "62263041": "Dangerous content",
+        "57734940": "Hate", "22137204": "Hate",
+        "74803281": "Other", "29578790": "Other", "42876398": "Other",
+        "39322892": "People/Face",
+        "92201652": "Personal information",
+        "89371032": "Prohibited content", "49114662": "Prohibited content", "72817394": "Prohibited content",
+        "90789179": "Sexual", "63429089": "Sexual", "43188360": "Sexual",
+        "78610348": "Toxic",
+        "61493863": "Violence", "56562880": "Violence",
+        "32635315": "Vulgar",
+        "64151117": "Celebrity or child"
+    }
+    
+    err_str = str(error_message)
+    match = re.search(r"Support codes?:?\s*([0-9\s,]+)", err_str, re.IGNORECASE)
+    if match:
+        codes_str = match.group(1)
+        found_codes = re.findall(r"\d+", codes_str)
+        reasons = []
+        for code in found_codes:
+            if code in SAFETY_ERROR_CODES:
+                reasons.append(SAFETY_ERROR_CODES[code])
+        
+        if reasons:
+            unique_reasons = list(set(reasons))
+            return f"{err_str}\n\n[Safety Filter Triggered] Explicit Reason(s): {', '.join(unique_reasons)} (Codes: {', '.join(found_codes)})"
+            
+    return err_str
 
 # Helper functions
 def comfy_tensor_to_pil(tensor):
@@ -100,6 +134,7 @@ class NanoBananaProNodeVertex:
                 "server_ip": ("STRING", {"default": current_config.get("server_ip", "")}),
                 "aspect_ratio": (["1:1", "2:3", "3:2", "4:3", "3:4", "9:16", "16:9"], {"default": "1:1"}),
                 "resolution": (["1K", "2K", "4K"], {"default": "1K"}),
+                "model": (["gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview"], {"default": "gemini-3-pro-image-preview"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
             },
             "optional": {"reference_images": ("IMAGE",)}
@@ -110,7 +145,7 @@ class NanoBananaProNodeVertex:
     FUNCTION = "generate_nano"
     CATEGORY = "UncutNodes"
 
-    def generate_nano(self, prompt, project_id, location, server_ip, aspect_ratio, resolution, seed, system_instruction, reference_images=None):
+    def generate_nano(self, prompt, project_id, location, server_ip, aspect_ratio, resolution, seed, system_instruction, model, reference_images=None):
         save_config(project_id, location, server_ip)
 
         client_kwargs = dict(vertexai=True, project=project_id, location=location)
@@ -135,7 +170,7 @@ class NanoBananaProNodeVertex:
             for attempt in range(max_retries):
                 try:
                     response = client.models.generate_content(
-                        model="gemini-3-pro-image-preview", # Nano Banana Pro
+                        model=model,
                         contents=contents,
                         config=types.GenerateContentConfig(
                             system_instruction=system_instruction,
@@ -151,7 +186,7 @@ class NanoBananaProNodeVertex:
                                 types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="OFF"),
                                 types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="OFF"),
                                 types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="OFF"),
-                            ]
+                            ],
                         )
                     )
                     break # Success!
@@ -161,7 +196,7 @@ class NanoBananaProNodeVertex:
                         time.sleep(retry_delay)
                         retry_delay *= 2  # Exponential backoff
                     else:
-                        raise e # Re-raise if not 429 or max retries reached
+                        raise Exception(interpret_safety_error(e)) # Re-raise interpreted error
                 except Exception as e:
                     if "429" in str(e) and attempt < max_retries - 1:
                         # Fallback for other exceptions that might contain 429
@@ -169,7 +204,7 @@ class NanoBananaProNodeVertex:
                         time.sleep(retry_delay)
                         retry_delay *= 2
                     else:
-                        raise e
+                        raise Exception(interpret_safety_error(e))
 
             # Output processing logic
             if hasattr(response, "candidates") and response.candidates:
