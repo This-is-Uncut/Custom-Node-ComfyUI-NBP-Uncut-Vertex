@@ -134,7 +134,7 @@ class NanoBananaProNodeVertex:
                 "server_ip": ("STRING", {"default": current_config.get("server_ip", "")}),
                 "aspect_ratio": (["1:1", "2:3", "3:2", "4:3", "3:4", "9:16", "16:9"], {"default": "1:1"}),
                 "resolution": (["1K", "2K", "4K"], {"default": "1K"}),
-                "model": (["gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview"], {"default": "gemini-3-pro-image-preview"}),
+                "model": (["gemini-3-pro-image", "gemini-3.1-flash-image"], {"default": "gemini-3-pro-image"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
             },
             "optional": {"reference_images": ("IMAGE",)}
